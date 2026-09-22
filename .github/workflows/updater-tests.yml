@@ -1,0 +1,28 @@
+name: stock-tui updater tests
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/autobump.yml
+      - .github/workflows/updater-tests.yml
+      - scripts/update-stock-tui.rb
+      - test/update_stock_tui_test.rb
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/autobump.yml
+      - .github/workflows/updater-tests.yml
+      - scripts/update-stock-tui.rb
+      - test/update_stock_tui_test.rb
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: ruby test/update_stock_tui_test.rb
