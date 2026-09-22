@@ -16,8 +16,9 @@ defaults:
 jobs:
   test-bot:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ macos-26 ]
+        os: [ macos-26, macos-15-intel ]
         include:
           - os: ubuntu-latest
             container:
