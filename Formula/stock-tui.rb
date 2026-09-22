@@ -4,6 +4,13 @@ class StockTui < Formula
   license "MIT"
   revision 1
 
+  bottle do
+    root_url "https://github.com/chatcode-lab/homebrew-tap/releases/download/stock-tui-0.3.2_1"
+    sha256 cellar: :any_skip_relocation, arm64_tahoe:  "7deeb34aa8572a2a5c736dfb0a9d76550a507d8a9def2618e41121983f13dd04"
+    sha256 cellar: :any_skip_relocation, sequoia:      "2f1a041b87a47c7203663976ea257cfddd2ddbb4e87ad4ecd0d7201e57f33062"
+    sha256 cellar: :any_skip_relocation, x86_64_linux: "88a39628b335b949d24685e9edff9d0abfbc37f1b4874d7ae0edb1f791997b04"
+  end
+
   on_macos do
     on_arm do
       url "https://github.com/chatcode-lab/stock-tui/releases/download/v0.3.2/stock-tui-v0.3.2-aarch64-apple-darwin.tar.gz"
