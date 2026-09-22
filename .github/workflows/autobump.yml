@@ -128,15 +128,15 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           generated_formula="$RUNNER_TEMP/generated-formula/stock-tui.rb"
-          actual_sha256="$(ruby -rdigest -e 'puts Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$generated_formula")"
+          actual_sha256="$(brew ruby -rdigest -e 'puts Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$generated_formula")"
           test "$actual_sha256" = "$EXPECTED_SHA256"
 
           tap_repo="$(brew --repository "$GITHUB_REPOSITORY")"
           install -m 0644 "$generated_formula" "$tap_repo/Formula/stock-tui.rb"
-          ruby -c "$tap_repo/Formula/stock-tui.rb"
+          brew ruby -- -c "$tap_repo/Formula/stock-tui.rb"
           brew style "$GITHUB_REPOSITORY/stock-tui"
           brew audit --strict "$GITHUB_REPOSITORY/stock-tui"
-          tap_sha256="$(ruby -rdigest -e 'puts Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$tap_repo/Formula/stock-tui.rb")"
+          tap_sha256="$(brew ruby -rdigest -e 'puts Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$tap_repo/Formula/stock-tui.rb")"
           test "$tap_sha256" = "$EXPECTED_SHA256"
           brew install --build-from-source "$GITHUB_REPOSITORY/stock-tui"
           brew test "$GITHUB_REPOSITORY/stock-tui"
