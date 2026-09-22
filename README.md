@@ -1,18 +1,34 @@
-# Chatcode-lab Tap
+# Chatcode Labs Homebrew Tap
 
-## How do I install these formulae?
+This tap contains Homebrew formulae maintained by
+[Chatcode Labs](https://github.com/chatcode-lab).
 
-`brew install chatcode-lab/tap/<formula>`
+## Install stock-tui
 
-Or `brew tap chatcode-lab/tap` and then `brew install <formula>`.
+```bash
+brew install chatcode-lab/tap/stock-tui
+```
 
-Or, in a `brew bundle` `Brewfile`:
+Homebrew updates the tap during `brew update`; install a newer release with:
+
+```bash
+brew upgrade stock-tui
+```
+
+To remove it:
+
+```bash
+brew uninstall stock-tui
+```
+
+In a `Brewfile`:
 
 ```ruby
 tap "chatcode-lab/tap"
-brew "<formula>"
+brew "stock-tui"
 ```
 
 ## Documentation
 
-`brew help`, `man brew` or check [Homebrew's documentation](https://docs.brew.sh).
+- [stock-tui](https://github.com/chatcode-lab/stock-tui)
+- [Homebrew documentation](https://docs.brew.sh)
