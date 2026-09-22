@@ -1,7 +1,6 @@
 class StockTui < Formula
   desc "Mouse-first terminal stock market heatmap inspired by StockTouch"
   homepage "https://github.com/chatcode-lab/stock-tui"
-  version "0.3.2"
   license "MIT"
   revision 1
 
