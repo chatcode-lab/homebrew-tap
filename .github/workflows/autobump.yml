@@ -1,41 +1,198 @@
-# brew tap-new uses this file to generate an autobump workflow for the new tap
-name: brew bump
+name: Update stock-tui formula
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/autobump.yml
+  workflow_dispatch:
+    inputs:
+      validate_current:
+        description: Validate the current formula on all platforms without publishing a change
+        required: false
+        default: false
+        type: boolean
   schedule:
-    # Every day at 16:30 UTC
-    - cron: 30 16 * * *
+    # Check after the normal stock-tui release window.
+    - cron: "30 16 * * *"
 
 permissions: {}
 
+concurrency:
+  group: stock-tui-formula-update
+  cancel-in-progress: false
+
 defaults:
   run:
-    shell: bash -xeuo pipefail {0}
+    shell: bash -euo pipefail {0}
 
 jobs:
-  autobump:
-    runs-on: ubuntu-latest
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+    outputs:
+      base_sha: ${{ steps.base.outputs.sha }}
+      changed: ${{ steps.update.outputs.changed }}
+      formula_sha256: ${{ steps.update.outputs.formula_sha256 }}
+      version: ${{ steps.update.outputs.version }}
+    steps:
+      # Always execute the trusted updater from the default branch, including
+      # for manually dispatched runs.
+      - name: Check out the tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Record the base revision
+        id: base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Test the updater
+        run: ruby test/update_stock_tui_test.rb
+
+      - name: Resolve the formula to validate
+        id: update
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_CURRENT: ${{ inputs.validate_current }}
+        run: |
+          arguments=()
+          if [[ "$VALIDATE_CURRENT" == "true" ]]; then
+            arguments+=(--current-only)
+          fi
+          ruby scripts/update-stock-tui.rb \
+            --formula Formula/stock-tui.rb \
+            --github-output "$GITHUB_OUTPUT" \
+            "${arguments[@]}"
+
+      - name: Preserve the verified formula
+        if: steps.update.outputs.changed == 'true' || inputs.validate_current
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-stock-tui-formula
+          path: Formula/stock-tui.rb
+          if-no-files-found: error
+          retention-days: 1
+
+  validate:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true' || inputs.validate_current
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-26, macos-15-intel ]
+        include:
+          - os: ubuntu-latest
+            container:
+              image: ghcr.io/homebrew/brew:main
+              options: --privileged
+    runs-on: ${{ matrix.os }}
+    container: ${{ fromJSON(toJSON(matrix.container)) }} # zizmor: ignore[unpinned-images]
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
     steps:
       - name: Set up Homebrew
         id: set-up-homebrew
         uses: Homebrew/actions/setup-homebrew@848c272c7bfe984a197bd4d16383f4c106ec61e6 # 2026.09.21.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up git
-        id: git_setup
-        uses: Homebrew/actions/git-user-config@848c272c7bfe984a197bd4d16383f4c106ec61e6 # 2026.09.21.1
-
-      - name: Bump formulae
+      - name: Pin the tap to the verified base revision
         env:
-          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_GIT_COMMITTER_NAME: ${{ steps.git_setup.outputs.name }}
-          HOMEBREW_GIT_COMMITTER_EMAIL: ${{ steps.git_setup.outputs.email }}
-          TAP_NAME: ${{ steps.set-up-homebrew.outputs.tap-name }}
-        run: brew bump --no-fork --open-pr --formulae --bump-synced --tap="$TAP_NAME"
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+        run: |
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          tap_repo="$(brew --repository "$GITHUB_REPOSITORY")"
+          git -C "$tap_repo" fetch --no-tags origin "$BASE_SHA"
+          git -C "$tap_repo" checkout --detach "$BASE_SHA"
+          test "$(git -C "$tap_repo" rev-parse HEAD)" = "$BASE_SHA"
+
+      - name: Cache Homebrew Bundler RubyGems
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.set-up-homebrew.outputs.gems-path }}
+          key: ${{ matrix.os }}-rubygems-${{ steps.set-up-homebrew.outputs.gems-hash }}
+          restore-keys: ${{ matrix.os }}-rubygems-
+
+      - name: Restore the verified formula
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: verified-stock-tui-formula
+          path: ${{ runner.temp }}/generated-formula
+
+      - name: Install and test the exact formula
+        env:
+          EXPECTED_SHA256: ${{ needs.prepare.outputs.formula_sha256 }}
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          generated_formula="$RUNNER_TEMP/generated-formula/stock-tui.rb"
+          actual_sha256="$(ruby -rdigest -e 'puts Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$generated_formula")"
+          test "$actual_sha256" = "$EXPECTED_SHA256"
+
+          tap_repo="$(brew --repository "$GITHUB_REPOSITORY")"
+          install -m 0644 "$generated_formula" "$tap_repo/Formula/stock-tui.rb"
+          ruby -c "$tap_repo/Formula/stock-tui.rb"
+          brew style "$GITHUB_REPOSITORY/stock-tui"
+          brew audit --strict "$GITHUB_REPOSITORY/stock-tui"
+          tap_sha256="$(ruby -rdigest -e 'puts Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$tap_repo/Formula/stock-tui.rb")"
+          test "$tap_sha256" = "$EXPECTED_SHA256"
+          brew install --build-from-source "$GITHUB_REPOSITORY/stock-tui"
+          brew test "$GITHUB_REPOSITORY/stock-tui"
+          "$(brew --prefix)/bin/stock-tui" --version | grep -F "$VERSION"
+          brew uninstall "$GITHUB_REPOSITORY/stock-tui"
+
+  finalize:
+    needs: [ prepare, validate ]
+    if: needs.prepare.outputs.changed == 'true' && !inputs.validate_current
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Check out the verified base revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.base_sha }}
+
+      - name: Restore the validated formula
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: verified-stock-tui-formula
+          path: ${{ runner.temp }}/generated-formula
+
+      - name: Commit the validated formula
+        env:
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          EXPECTED_SHA256: ${{ needs.prepare.outputs.formula_sha256 }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          generated_formula="$RUNNER_TEMP/generated-formula/stock-tui.rb"
+          actual_sha256="$(ruby -rdigest -e 'puts Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$generated_formula")"
+          test "$actual_sha256" = "$EXPECTED_SHA256"
+          ruby -c "$generated_formula"
+
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          current_main="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$current_main" != "$BASE_SHA" ]]; then
+            echo "main moved from $BASE_SHA to $current_main; aborting for the next run" >&2
+            exit 1
+          fi
+
+          install -m 0644 "$generated_formula" Formula/stock-tui.rb
+          git diff --quiet -- Formula/stock-tui.rb && {
+            echo "The updater reported a change but produced no formula diff." >&2
+            exit 1
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/stock-tui.rb
+          git commit -m "stock-tui ${VERSION}"
+          git push origin HEAD:refs/heads/main
+
+          printf 'Published stock-tui %s from validated formula %s.\n' \
+            "$VERSION" "$EXPECTED_SHA256" >> "$GITHUB_STEP_SUMMARY"
