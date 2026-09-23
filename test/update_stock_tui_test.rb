@@ -239,6 +239,15 @@ class StockTuiReleaseUpdaterTest < Minitest::Test
     FileUtils.remove_entry(directory) if directory && File.exist?(directory)
   end
 
+  def test_validation_job_uses_homebrew_portable_ruby
+    workflow = File.read(File.expand_path("../.github/workflows/autobump.yml", __dir__))
+    validation_job = workflow[/^  validate:\n(.*?)(?=^  finalize:\n)/m, 1]
+
+    refute_nil validation_job
+    assert_includes validation_job, "brew ruby"
+    refute_match(/(?<!brew )\bruby\b/, validation_job)
+  end
+
   private
 
   def source_formula(version, revision: nil)
